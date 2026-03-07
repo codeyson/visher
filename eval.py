@@ -15,7 +15,7 @@ from model import RawNet
 SAMPLE_RATE = 24000
 NB_SAMP     = 64600   # must match model_config_RawNet.yaml nb_samp
 
-BINARY_LABELS = ['fake', 'real']
+BINARY_LABELS = ['real', 'fake']
 MULTI_LABELS  = ['gt', 'wavegrad', 'diffwave', 'parallel_wave_gen',
                   'wavernn', 'wavenet', 'melgan']
 
