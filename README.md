@@ -41,6 +41,6 @@ python eval.py --input_path ./LibriSeVoc/wavernn/696_92939_000008_000001_gen.wav
 Run in Sequence:
 ```bash
 python pruning.py
-python python quantization.py
-python quantized_inference.py
+python quantization.py
+python quantized_inference.py --input_path ./LibriSeVoc/gt/200_126784_000070_000000.wav
 ```
