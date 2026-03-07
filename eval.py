@@ -1,98 +1,114 @@
+"""
+How to run:
+    Evaluate Real voice: python eval.py --input_path ./LibriSeVoc/gt/250_142286_000031_000006.wav --model_path ./checkpoints/best_model.pth
+    Evaluate Fake voice: python eval.py --input_path ./LibriSeVoc/wavernn/696_92939_000008_000001_gen.wav --model_path ./checkpoints/best_model.pth
+"""
+
 import argparse
-import sys
-import os
 import numpy as np
 import torch
-from torch import nn
 from torch import Tensor
 import yaml
-from model import RawNet
-from torch.nn import functional as F
 import librosa
-import json
-from datetime import datetime
+from model import RawNet
 
-def pad(x, max_len=96000):
+SAMPLE_RATE = 24000
+NB_SAMP     = 64600   # must match model_config_RawNet.yaml nb_samp
+
+BINARY_LABELS = ['fake', 'real']
+MULTI_LABELS  = ['gt', 'wavegrad', 'diffwave', 'parallel_wave_gen',
+                  'wavernn', 'wavenet', 'melgan']
+
+
+def pad(x, max_len=NB_SAMP):
+    """Repeat-pad a 1-D numpy array to max_len."""
     x_len = x.shape[0]
     if x_len >= max_len:
         return x[:max_len]
-    # need to pad
-    num_repeats = int(max_len / x_len)+1
-    padded_x = np.tile(x, (1, num_repeats))[:, :max_len][0]
-    return padded_x	
+    num_repeats = (max_len // x_len) + 1
+    return np.tile(x, num_repeats)[:max_len]
 
-def load_sample(sample_path, max_len = 96000):
-    
-    y_list = []
-    y, sr = librosa.load(sample_path, sr=None)
-    
-    if sr != 24000:
-        y = librosa.resample(y, orig_sr = sr, target_sr = 24000)
-        
-    if(len(y) <= 96000):
+
+def load_segments(audio_path, max_len=NB_SAMP):
+    """
+    Load an audio file and return a list of fixed-length Tensor segments.
+    Files shorter than max_len are padded to exactly one segment.
+    Longer files are chunked into non-overlapping segments of max_len.
+    """
+    y, sr = librosa.load(audio_path, sr=None, mono=True)
+
+    if sr != SAMPLE_RATE:
+        y = librosa.resample(y, orig_sr=sr, target_sr=SAMPLE_RATE)
+
+    if len(y) <= max_len:
         return [Tensor(pad(y, max_len))]
-        
-    for i in range(int(len(y)/96000)):
-        if (i+1) ==  range(int(len(y)/96000)):
-            y_seg = y[i*96000 : ]
-        else:
-            y_seg = y[i*96000 : (i+1)*96000]
-        # print(len(y_seg))
-        y_pad = pad(y_seg, max_len)
-        y_inp = Tensor(y_pad)
-        
-        y_list.append(y_inp)
-        
-    return y_list
-    
-    # print(json_text)
-    
-    with open(output_path, 'w') as json_w:
-        json.dump(json_text, json_w)
-    
+
+    segments = []
+    num_chunks = len(y) // max_len
+    for i in range(num_chunks):
+        chunk = y[i * max_len : (i + 1) * max_len]
+        segments.append(Tensor(pad(chunk, max_len)))
+
+    return segments
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input_path', type=str, help='This path should be an external path point to an audio file')
-    parser.add_argument('--model_path', type=str, help='This path should be an external path point to an audio file')
+    parser.add_argument('--input_path',  type=str, required=True,
+                        help='Path to input .wav file')
+    parser.add_argument('--model_path',  type=str, required=True,
+                        help='Path to saved model .pth file')
+    parser.add_argument('--config_path', type=str, default='model_config_RawNet.yaml',
+                        help='Path to model config YAML')
     args = parser.parse_args()
 
-    input_path = args.input_path
-    model_path = args.model_path
-
-    # load model config
-    dir_yaml = 'model_config_RawNet.yaml'
-    with open(dir_yaml, 'r') as f_yaml:
-        parser1 = yaml.safe_load(f_yaml)
-    
-    # load cuda
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print('Device: {}'.format(device))
-    
-    # init model
-    model = RawNet(parser1['model'], device)
-    model =(model).to(device)
-    
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    print('Model loaded : {}'.format(model_path))
-    
+    print(f'Device: {device}')
+
+    # Load model
+    with open(args.config_path, 'r') as f:
+        config = yaml.safe_load(f)
+
+    model = RawNet(config['model'], device).to(device)
+    model.load_state_dict(torch.load(args.model_path, map_location=device))
     model.eval()
-    
-    out_list_multi = []
+    print(f'Model loaded: {args.model_path}')
+
+    # Load audio segments
+    segments = load_segments(args.input_path)
+    print(f'Audio split into {len(segments)} segment(s) of {NB_SAMP} samples each.')
+
     out_list_binary = []
-    for m_batch in load_sample(input_path):
-        m_batch = m_batch.to(device=device, dtype=torch.float).unsqueeze(0)
-        logits, multi_logits = model(m_batch)
-        
-        probs = F.softmax(logits, dim=-1)
-        probs_multi = F.softmax(multi_logits, dim=-1)
-        # print(probs)
-        # out_list.append([probs[i, 1].item() for i in range(probs.size(0))][0])
-        out_list_multi.append(probs_multi.tolist()[0])
-        out_list_binary.append(probs.tolist()[0])
+    out_list_multi  = []
 
-    result_multi = np.average(out_list_multi, axis=0).tolist()
-    result_binary = np.average(out_list_binary, axis=0).tolist()
+    with torch.no_grad():
+        for segment in segments:
+            x = segment.to(device=device, dtype=torch.float).unsqueeze(0)  # (1, NB_SAMP)
+            out_binary, out_multi = model(x)
 
-    print('Multi classification result : gt:{}, wavegrad:{}, diffwave:{}, parallel wave gan:{}, wavernn:{}, wavenet:{}, melgan:{}'.format(result_multi[0], result_multi[1], result_multi[2], result_multi[3], result_multi[4], result_multi[5], result_multi[6]))
-    print('Binary classification result : fake:{}, real:{}'.format(result_binary[0], result_binary[1]))
+            # Model outputs LogSoftmax → use exp() to get probabilities (NOT softmax again)
+            prob_binary = torch.exp(out_binary).squeeze().cpu().tolist()
+            prob_multi  = torch.exp(out_multi).squeeze().cpu().tolist()
+
+            out_list_binary.append(prob_binary)
+            out_list_multi.append(prob_multi)
+
+    # Average probabilities across all segments
+    result_binary = np.mean(out_list_binary, axis=0).tolist()
+    result_multi  = np.mean(out_list_multi,  axis=0).tolist()
+
+    print('\nMulti classification result:')
+    multi_str = ', '.join(
+        f'{label}: {prob:.4f}' for label, prob in zip(MULTI_LABELS, result_multi)
+    )
+    print(f'  {multi_str}')
+
+    print('\nBinary classification result:')
+    binary_str = ', '.join(
+        f'{label}: {prob:.4f}' for label, prob in zip(BINARY_LABELS, result_binary)
+    )
+    print(f'  {binary_str}')
+
+    pred_binary = BINARY_LABELS[int(np.argmax(result_binary))]
+    pred_multi  = MULTI_LABELS[int(np.argmax(result_multi))]
+    print(f'\n→ Verdict: {pred_binary.upper()}  (most likely source: {pred_multi})')
