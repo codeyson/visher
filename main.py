@@ -284,8 +284,8 @@ if __name__ == '__main__':
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     # ── Weighted loss: penalise misclassifying real voices more ──────────────
-    binary_weights  = torch.tensor([6.0, 1.0]).to(device)
-    multi_weights   = torch.tensor([6.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]).to(device)
+    binary_weights  = torch.tensor([2.5, 1.0]).to(device)
+    multi_weights   = torch.tensor([2.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]).to(device)
     criterion_bin   = nn.NLLLoss(weight=binary_weights)
     criterion_multi = nn.NLLLoss(weight=multi_weights)
 
