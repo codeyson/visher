@@ -13,7 +13,7 @@ with open(dir_yaml, 'r') as f_yaml:
     parser1 = yaml.safe_load(f_yaml)
 # Load your model (assuming parser1 is already defined and configured)
 model = RawNet(parser1['model'], device)
-model.load_state_dict(torch.load("path_to_best_model.pth", map_location=device))
+model.load_state_dict(torch.load("./checkpoints/best_model.pth", map_location=device))
 
 # Apply pruning to convolutional and linear layers
 def apply_pruning(module, pruning_amount=0.5):

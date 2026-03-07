@@ -1,41 +1,75 @@
 import torch
-from model import RawNet  # Assuming RawNet is defined in model.py
 import yaml
-from torch import Tensor
 import librosa
-# Set device
+import numpy as np
+from torch import Tensor
+from model import RawNet
+
+NB_SAMP = 64600
+SAMPLE_RATE = 24000
+
+BINARY_LABELS = ['fake', 'real']
+MULTI_LABELS  = ['gt', 'wavegrad', 'diffwave', 'parallel_wave_gan',
+                  'wavernn', 'wavenet', 'melgan']
+
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print(f'Device: {device}')
 
-# Load model configuration (same as used during training)
-dir_yaml = 'model_config_RawNet.yaml'
-with open(dir_yaml, 'r') as f_yaml:
-    parser1 = yaml.safe_load(f_yaml)
+# Load model config
+with open('model_config_RawNet.yaml', 'r') as f:
+    config = yaml.safe_load(f)
 
-# Initialize the model structure
-model = RawNet(parser1['model'], device)
+# ── Build model, apply quantization structure, THEN load weights ──────────────
+# Quantization changes the layer types, so we must recreate the same
+# quantized structure before loading the quantized state dict.
+model = RawNet(config['model'], device)
+model.eval()
 
-# Load the quantized model weights
-quantized_model_path = "quantized_model.pth"
-model.load_state_dict(torch.load(quantized_model_path, map_location=device))
-model.eval()  # Set to evaluation mode
-print("Quantized model loaded for inference.")
+quantized_model = torch.quantization.quantize_dynamic(
+    model, {torch.nn.Linear}, dtype=torch.qint8
+)
 
-# Example inference function
-def infer(model, audio_path):
-    # Load and preprocess the audio file
-    audio, sr = librosa.load(audio_path, sr=24000)
-    audio_tensor = Tensor(audio).to(device)
-    audio_tensor = audio_tensor.unsqueeze(0)  # Add batch dimension
+quantized_model.load_state_dict(
+    torch.load('quantized_pruned_model.pth', map_location=device)
+)
+quantized_model.eval()
+print('Quantized model loaded.')
+
+
+def load_audio(audio_path):
+    """Load, resample, pad/trim to NB_SAMP."""
+    y, sr = librosa.load(audio_path, sr=None, mono=True)
+    if sr != SAMPLE_RATE:
+        y = librosa.resample(y, orig_sr=sr, target_sr=SAMPLE_RATE)
+    if len(y) < NB_SAMP:
+        y = np.tile(y, (NB_SAMP // len(y)) + 1)
+    y = y[:NB_SAMP]
+    return Tensor(y).unsqueeze(0)  # (1, NB_SAMP)
+
+
+def infer(audio_path):
+    audio_tensor = load_audio(audio_path).to(device)
 
     with torch.no_grad():
-        output_binary, output_multi = model(audio_tensor)
-        _, pred_binary = torch.max(output_binary, dim=1)
-        _, pred_multi = torch.max(output_multi, dim=1)
+        output_binary, output_multi = quantized_model(audio_tensor)
+        prob_binary = torch.exp(output_binary).squeeze().tolist()
+        prob_multi  = torch.exp(output_multi).squeeze().tolist()
 
-    # Output results
-    print(f"Binary Prediction (Real vs. Fake): {pred_binary.item()}")
-    print(f"Multi-Class Prediction (Class): {pred_multi.item()}")
+    print('\nMulti classification result:')
+    print('  ' + ', '.join(f'{l}: {p:.4f}' for l, p in zip(MULTI_LABELS, prob_multi)))
 
-# Run inference on a sample audio file
-audio_path = "path_to_audio_file.wav"
-infer(model, audio_path)
+    print('\nBinary classification result:')
+    print('  ' + ', '.join(f'{l}: {p:.4f}' for l, p in zip(BINARY_LABELS, prob_binary)))
+
+    pred_binary = BINARY_LABELS[int(torch.argmax(torch.tensor(prob_binary)))]
+    pred_multi  = MULTI_LABELS[int(torch.argmax(torch.tensor(prob_multi)))]
+    print(f'\n→ Verdict: {pred_binary.upper()}  (most likely source: {pred_multi})')
+
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--input_path', type=str, required=True,
+                        help='Path to .wav file')
+    args = parser.parse_args()
+    infer(args.input_path)
