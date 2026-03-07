@@ -17,11 +17,11 @@ pip install -r requirements.txt
 
 ## Training
 
-#### Train_Visher
+#### Quick Training
 ```bash
 python main.py --data_path ./LibriSeVoc  --batch_size 4  --num_epochs 2  --model_save_path ./checkpoints
 ```
-#### Train_Voiceguard
+#### Full Training
 ```bash
 python main.py --data_path ./LibriSeVoc  --batch_size 64 --num_epochs 50  --lr 0.0001 --model_save_path ./checkpoints
 ```
