@@ -1,8 +1,6 @@
 optimizer: Adam 
 amsgrad: 1   #for adam optim
 
-
-
 #model-related
 model:
   nb_samp: 64600
