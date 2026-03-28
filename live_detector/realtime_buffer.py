@@ -115,16 +115,15 @@ class TemporalSmoother:
         self._confs : deque[float] = deque(maxlen=window_size)
 
     def update(self, label: int, confidence: float) -> tuple[int, float]:
-        """
-        Add a new prediction; return the smoothed (label, confidence).
-        """
         self._preds.append(label)
         self._confs.append(confidence)
 
-        if self.mode == "majority":
-            smoothed_label = int(round(np.mean(self._preds)))
-        else:
-            smoothed_label = int(np.mean(self._preds) >= 0.5)
+        ai_votes = sum(self._preds)
+        total = len(self._preds)
+
+        # Flag AI if ANY recent window detected it (more sensitive)
+        # Change the threshold below: 0.34 = flag if 1-in-3 say AI
+        smoothed_label = 1 if (ai_votes / total) >= 0.34 else 0
 
         smoothed_conf = float(np.mean(self._confs))
         return smoothed_label, smoothed_conf

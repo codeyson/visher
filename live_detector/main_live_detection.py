@@ -99,7 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Append predictions to a JSON-lines file")
     p.add_argument("--mic-device",   default=None,
                    help="sounddevice device name (partial match OK) or index number")
-    p.add_argument("--silence-threshold", type=float, default=0.001,
+    p.add_argument("--silence-threshold", type=float, default=0.0001,
                    help="RMS energy below this level is treated as silence and skipped (0=disable)")
     p.add_argument("--list-devices", action="store_true",
                    help="List all audio input devices and exit")

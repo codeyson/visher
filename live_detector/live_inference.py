@@ -26,7 +26,7 @@ from model_loader     import RawNet, load_model, DEFAULT_CONFIG
 # ──────────────────────────────────────────────────────────────────────────────
 
 TARGET_SR      = 24_000
-TARGET_SAMPLES = 64_600          # ~2.69 s at 24 kHz
+TARGET_SAMPLES = 24_000          # ~2.69 s at 24 kHz
 BINARY_LABELS  = {0: "Human Voice", 1: "AI Generated Voice"}
 MULTI_LABELS   = [
     "gt", "wavegrad", "diffwave",
@@ -90,11 +90,9 @@ class Preprocessor:
     def normalise(self, audio: np.ndarray) -> np.ndarray:
         # Use 99th-percentile peak instead of max to be robust to
         # single-sample spikes from VB-Cable/Windows audio processing
-        peak = float(np.percentile(np.abs(audio), 99))
+        peak = np.abs(audio).max()   # ← match training
         if peak > 1e-6:
             audio = audio / peak
-            # Hard clip to [-1, 1] in case 99th percentile underestimates
-            audio = np.clip(audio, -1.0, 1.0)
         return audio.astype(np.float32)
 
     def process(self, audio: np.ndarray, src_sr: int | None = None) -> torch.Tensor:
@@ -261,22 +259,39 @@ class LiveDetector:
 
     def _inference_loop(self) -> None:
         import queue as _queue
+        segment_votes = []   # accumulate votes for current speech segment
+
         while not self._stop.is_set():
             try:
-                window    = self._infer_q.get(timeout=0.2)
-                # Skip silent windows — model predictions on silence are meaningless
+                window = self._infer_q.get(timeout=0.2)
                 rms = float(np.sqrt(np.mean(window ** 2)))
+
                 if rms < self.silence_threshold:
+                    # End of speech segment — emit verdict if we have votes
+                    if segment_votes:
+                        ai_ratio = sum(segment_votes) / len(segment_votes)
+                        verdict = 1 if ai_ratio >= 0.34 else 0
+                        label_str = "AI Generated Voice" if verdict == 1 else "Human Voice"
+                        flag = "⚠️ " if verdict == 1 else "✅"
+                        print(f"\n{'='*50}")
+                        print(f"  SEGMENT VERDICT: {flag} {label_str}")
+                        print(f"  AI windows: {sum(segment_votes)}/{len(segment_votes)} ({ai_ratio*100:.0f}%)")
+                        print(f"{'='*50}\n")
+                        segment_votes = []
+                    self.engine.smoother.reset()
                     print(f"[{time.time()-self._start_time:07.2f}s] 🔇  Silence (rms={rms:.5f}) — skipping")
                     continue
+
                 timestamp = time.time() - self._start_time
-                result    = self.engine.predict(window, src_sr=None, timestamp=timestamp)
-                # Attach rms to result for debugging
+                result = self.engine.predict(window, src_sr=None, timestamp=timestamp)
                 result["window_rms"] = rms
+
+                # Accumulate raw (not smoothed) per-window vote
+                segment_votes.append(result["raw_label"])
+
                 self.on_result(result)
             except _queue.Empty:
                 continue
-
     @staticmethod
     def _default_print(result: dict) -> None:
         ts   = result["timestamp"]
