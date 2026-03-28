@@ -26,7 +26,7 @@ from model_loader     import RawNet, load_model, DEFAULT_CONFIG
 # ──────────────────────────────────────────────────────────────────────────────
 
 TARGET_SR      = 24_000
-TARGET_SAMPLES = 24_000          # ~2.69 s at 24 kHz
+TARGET_SAMPLES = 64_600          # ~2.69 s at 24 kHz
 BINARY_LABELS  = {0: "Human Voice", 1: "AI Generated Voice"}
 MULTI_LABELS   = [
     "gt", "wavegrad", "diffwave",
@@ -207,7 +207,7 @@ class LiveDetector:
         src_sr        : int         = TARGET_SR,
         window_samples: int         = TARGET_SAMPLES,
         hop_samples   : int         = 24_000,
-        smoother_k    : int         = 5,
+        smoother_k    : int         = 3,
         on_result                   = None,
         silence_threshold   : float = 0.001,
     ):
@@ -270,7 +270,7 @@ class LiveDetector:
                     # End of speech segment — emit verdict if we have votes
                     if segment_votes:
                         ai_ratio = sum(segment_votes) / len(segment_votes)
-                        verdict = 1 if ai_ratio >= 0.34 else 0
+                        verdict = 1 if ai_ratio >= 0.15 else 0
                         label_str = "AI Generated Voice" if verdict == 1 else "Human Voice"
                         flag = "⚠️ " if verdict == 1 else "✅"
                         print(f"\n{'='*50}")
