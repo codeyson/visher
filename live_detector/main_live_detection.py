@@ -7,21 +7,11 @@ Usage examples
 # List all audio devices (find your virtual cable)
 python main_live_detection.py --list-devices
 
-# Microphone (default)
-python main_live_detection.py --model checkpoints/best_model.pth
-
-# Messenger / VoIP via virtual audio cable (VB-Cable)
-python main_live_detection.py --model checkpoints/best_model.pth --mic-device "CABLE Output (VB-Audio Virtual Cable)"
-
 # By device index
-python main_live_detection.py --model checkpoints/best_model.pth --mic-device 3
+python live_detector/main_live_detection.py --model checkpoints/best_model.pth --mic-device 17
 
 # Pre-recorded file (for testing)
 python main_live_detection.py --model checkpoints/best_model.pth --source file --path sample.wav
-
-# Raw PCM from stdin (WebRTC / VoIP bridge via ffmpeg)
-ffmpeg -i call.sdp -f s16le -ar 16000 -ac 1 - ^
-  | python main_live_detection.py --model checkpoints/best_model.pth --source pipe --src-sr 16000
 
 # Show verbose multi-class breakdown
 python main_live_detection.py --model checkpoints/best_model.pth --verbose
