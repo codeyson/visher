@@ -29,7 +29,7 @@ FOLDER_TO_LABEL = {
     'wavernn':           4,
     'wavenet':           5,
     'melgan':            6,
-    'elevenlabs':        7,  
+    'elevenlabs':        7,   # modern neural TTS
 }
 
 
@@ -104,6 +104,12 @@ class Dataset_LibriSeVoc(Dataset):
         # AudioAugmentor.__call__ returns shape (T,) — safe for torch.stack
         if self.split == 'train' and random.random() < self.aug_prob:
             waveform = self.augmentor(waveform)
+
+        # Resampling augmentations can shift length by a few samples — enforce fixed size
+        if waveform.shape[-1] < self.cut:
+            pad = self.cut - waveform.shape[-1]
+            waveform = torch.nn.functional.pad(waveform, (0, pad))
+        waveform = waveform[:self.cut]
 
         # Per-sample normalisation
         waveform = (waveform - waveform.mean()) / (waveform.std() + 1e-6)
@@ -314,16 +320,19 @@ if __name__ == '__main__':
     print('\nBuilding balanced sampler...')
     sampler = make_balanced_sampler(splits['train'][1])
 
+    # num_workers=0 required on Windows — multiprocessing workers deadlock
+    # on Windows with the default 'spawn' start method.
+    # On Linux/macOS you can safely raise this to 4.
     train_loader = DataLoader(train_set,
                               batch_size=args.batch_size,
                               sampler=sampler,
-                              num_workers=4,
+                              num_workers=0,
                               collate_fn=collate_skip_none,
                               pin_memory=(device == 'cuda'))
     dev_loader   = DataLoader(dev_set,
                               batch_size=args.batch_size,
                               shuffle=False,
-                              num_workers=4,
+                              num_workers=0,
                               collate_fn=collate_skip_none,
                               pin_memory=(device == 'cuda'))
 
@@ -332,6 +341,7 @@ if __name__ == '__main__':
         config = yaml.safe_load(f)
 
     model     = RawNet(config['model'], device).to(device)
+    print(f"  [DEBUG] nb_classes from yaml: {config['model']['nb_classes']}")
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr,
                                  weight_decay=1e-4)
 

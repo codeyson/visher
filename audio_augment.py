@@ -147,16 +147,26 @@ class AudioAugmentor:
 
     def pitch_shift(self, waveform):
         """
-        Simulate minor recording chain speed variation via resampling
-        (±2 semitones). Cheap proxy for true pitch shifting.
+        Simulate minor recording chain speed variation using small integer
+        resampling ratios. Irrational ratios (e.g. 24000→26919) produce a
+        tiny GCD and a sinc kernel that allocates gigabytes — so we pick
+        from a fixed set of ratios whose LCM stays small.
+
+        Ratio table (orig_freq, new_freq):
+          +1 semitone  ≈ 25/24  (+4.2 %)
+          +2 semitones ≈ 16/15  (+6.7 %)
+          -1 semitone  ≈ 24/25  (-4.0 %)
+          -2 semitones ≈ 15/16  (-6.3 %)
         """
-        semitones = random.uniform(-2, 2)
-        factor    = 2 ** (semitones / 12)
-        orig_len  = waveform.shape[-1]
-        new_sr    = int(self.sample_rate * factor)
-        if new_sr == self.sample_rate:
-            return waveform
-        waveform  = torchaudio.functional.resample(waveform, self.sample_rate, new_sr)
+        RATIOS = [
+            (25, 24),   # ~ +1 semitone
+            (16, 15),   # ~ +2 semitones
+            (24, 25),   # ~ -1 semitone
+            (15, 16),   # ~ -2 semitones
+        ]
+        orig_freq, new_freq = random.choice(RATIOS)
+        orig_len = waveform.shape[-1]
+        waveform = torchaudio.functional.resample(waveform, orig_freq, new_freq)
         # Trim or pad back to original length
         if waveform.shape[-1] >= orig_len:
             waveform = waveform[..., :orig_len]
